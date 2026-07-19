@@ -8,5 +8,5 @@ public sealed record OrderItemEvent(
 public sealed record OrderCreatedEvent(
     Guid OrderId,
     string CustomerName,
-    IReadOnlyList<OrderItemEvent> Items,
+    List<OrderItemEvent> Items,
     DateTime CreatedAt);

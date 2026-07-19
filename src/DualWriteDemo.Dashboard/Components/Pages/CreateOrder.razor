@@ -30,11 +30,13 @@ else
                 </tr>
             </thead>
             <tbody>
-                @foreach (var item in formModel.Items.Select((value, index) => new { value, index }))
+                @for (int i = 0; i < formModel.Items.Count; i++)
                 {
+                    var idx = i;
                     <tr>
                         <td>
-                            <select @bind="item.value.ProductId" class="form-select">
+                            <select class="form-select" value="@formModel.Items[idx].ProductId"
+                                    @onchange="@((ChangeEventArgs e) => OnProductSelected(idx, e.Value?.ToString()))">
                                 <option value="">Select a product...</option>
                                 @foreach (var product in products)
                                 {
@@ -43,15 +45,15 @@ else
                             </select>
                         </td>
                         <td>
-                            <InputNumber @bind-Value="item.value.Quantity" class="form-control" min="1" />
+                            <InputNumber @bind-Value="formModel.Items[idx].Quantity" class="form-control" min="1" />
                         </td>
                         <td>
-                            <InputNumber @bind-Value="item.value.UnitPrice" class="form-control" min="0" step="0.01" />
+                            <InputNumber @bind-Value="formModel.Items[idx].UnitPrice" class="form-control" min="0" step="0.01" />
                         </td>
-                        <td>@((item.value.Quantity * item.value.UnitPrice).ToString("C"))</td>
+                        <td>@((formModel.Items[idx].Quantity * formModel.Items[idx].UnitPrice).ToString("C"))</td>
                         <td>
                             <button type="button" class="btn btn-danger btn-sm"
-                                    @onclick="() => formModel.Items.RemoveAt(item.index)">Remove</button>
+                                    @onclick="() => formModel.Items.RemoveAt(idx)">Remove</button>
                         </td>
                     </tr>
                 }
@@ -89,6 +91,31 @@ else
         formModel.Items.Add(new OrderItemModel());
     }
 
+    private void OnProductSelected(int index, string? value)
+    {
+        if (Guid.TryParse(value, out var productId))
+        {
+            formModel.Items[index].ProductId = productId;
+            // Set default unit price from selected product
+            var product = products?.FirstOrDefault(p => p.Id == productId);
+            if (product is not null)
+            {
+                formModel.Items[index].UnitPrice = product.Name switch
+                {
+                    "Laptop" => 999.99m,
+                    "Mouse" => 29.99m,
+                    "Keyboard" => 49.99m,
+                    "Monitor" => 299.99m,
+                    "Headphone" => 79.99m,
+                    "Webcam" => 89.99m,
+                    "USB-C Hub" => 39.99m,
+                    "SSD 1TB" => 129.99m,
+                    _ => formModel.Items[index].UnitPrice
+                };
+            }
+        }
+    }
+
     private async Task HandleSubmit()
     {
         error = null;
@@ -109,7 +136,7 @@ else
             {
                 if (formModel.SimulateCrash)
                 {
-                    error = "Order saved to DB but fault injection triggered — event was never published to Kafka. Check the Orders page for inconsistency.";
+                    error = "Fault injection triggered — transaction rolled back. No data was written (Outbox Pattern prevents inconsistency).";
                 }
                 else
                 {
@@ -125,7 +152,7 @@ else
         {
             if (formModel.SimulateCrash)
             {
-                error = "Fault injection: Order saved to DB but crash occurred before Kafka publish. Check the Orders page for inconsistency indicator.";
+                error = "Fault injection triggered — transaction rolled back. No data was written (Outbox Pattern prevents inconsistency).";
             }
             else
             {
