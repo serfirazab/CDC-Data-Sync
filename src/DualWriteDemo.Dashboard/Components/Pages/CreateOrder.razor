@@ -1,0 +1,177 @@
+@page "/create-order"
+@rendermode InteractiveServer
+@inject OrderApiClient OrderApi
+@inject InventoryApiClient InventoryApi
+@inject NavigationManager Navigation
+
+<h3>Create Order</h3>
+
+@if (products is null)
+{
+    <p>Loading products...</p>
+}
+else
+{
+    <EditForm Model="@formModel" OnValidSubmit="@HandleSubmit">
+        <div class="mb-3">
+            <label class="form-label">Customer Name</label>
+            <InputText @bind-Value="formModel.CustomerName" class="form-control" />
+        </div>
+
+        <h5>Order Items</h5>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    <th>Quantity</th>
+                    <th>Unit Price</th>
+                    <th>Total</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @for (int i = 0; i < formModel.Items.Count; i++)
+                {
+                    var idx = i;
+                    <tr>
+                        <td>
+                            <select class="form-select" value="@formModel.Items[idx].ProductId"
+                                    @onchange="@((ChangeEventArgs e) => OnProductSelected(idx, e.Value?.ToString()))">
+                                <option value="">Select a product...</option>
+                                @foreach (var product in products)
+                                {
+                                    <option value="@product.Id">@product.Name (stock: @product.StockQuantity)</option>
+                                }
+                            </select>
+                        </td>
+                        <td>
+                            <InputNumber @bind-Value="formModel.Items[idx].Quantity" class="form-control" min="1" />
+                        </td>
+                        <td>
+                            <InputNumber @bind-Value="formModel.Items[idx].UnitPrice" class="form-control" min="0" step="0.01" />
+                        </td>
+                        <td>@((formModel.Items[idx].Quantity * formModel.Items[idx].UnitPrice).ToString("C"))</td>
+                        <td>
+                            <button type="button" class="btn btn-danger btn-sm"
+                                    @onclick="() => formModel.Items.RemoveAt(idx)">Remove</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <button type="button" class="btn btn-secondary mb-3" @onclick="AddItem">Add Item</button>
+
+        <div class="mb-3 form-check">
+            <InputCheckbox @bind-Value="formModel.SimulateCrash" class="form-check-input" id="simulateCrash" />
+            <label class="form-check-label text-danger" for="simulateCrash">Crash Simulate Et (Fault Injection)</label>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Create Order</button>
+    </EditForm>
+
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="alert alert-danger mt-3">@error</div>
+    }
+}
+
+@code {
+    private List<ProductInfo>? products;
+    private CreateOrderModel formModel = new();
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        products = await InventoryApi.GetProductsAsync();
+    }
+
+    private void AddItem()
+    {
+        formModel.Items.Add(new OrderItemModel());
+    }
+
+    private void OnProductSelected(int index, string? value)
+    {
+        if (Guid.TryParse(value, out var productId))
+        {
+            formModel.Items[index].ProductId = productId;
+            // Set default unit price from selected product
+            var product = products?.FirstOrDefault(p => p.Id == productId);
+            if (product is not null)
+            {
+                formModel.Items[index].UnitPrice = product.Name switch
+                {
+                    "Laptop" => 999.99m,
+                    "Mouse" => 29.99m,
+                    "Keyboard" => 49.99m,
+                    "Monitor" => 299.99m,
+                    "Headphone" => 79.99m,
+                    "Webcam" => 89.99m,
+                    "USB-C Hub" => 39.99m,
+                    "SSD 1TB" => 129.99m,
+                    _ => formModel.Items[index].UnitPrice
+                };
+            }
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        error = null;
+
+        var request = new CreateOrderRequest(
+            formModel.CustomerName,
+            formModel.Items
+                .Where(i => i.ProductId != Guid.Empty)
+                .Select(i => new OrderItemInput(i.ProductId, i.Quantity, i.UnitPrice))
+                .ToList(),
+            formModel.SimulateCrash);
+
+        try
+        {
+            var result = await OrderApi.CreateOrderAsync(request);
+
+            if (result is null)
+            {
+                if (formModel.SimulateCrash)
+                {
+                    error = "Fault injection triggered — transaction rolled back. No data was written (Outbox Pattern prevents inconsistency).";
+                }
+                else
+                {
+                    error = "Failed to create order. Check if OrderService is running.";
+                }
+            }
+            else
+            {
+                Navigation.NavigateTo("/orders");
+            }
+        }
+        catch (Exception ex)
+        {
+            if (formModel.SimulateCrash)
+            {
+                error = "Fault injection triggered — transaction rolled back. No data was written (Outbox Pattern prevents inconsistency).";
+            }
+            else
+            {
+                error = $"Error: {ex.Message}";
+            }
+        }
+    }
+
+    private sealed class CreateOrderModel
+    {
+        public string CustomerName { get; set; } = "Demo Customer";
+        public List<OrderItemModel> Items { get; set; } = [new()];
+        public bool SimulateCrash { get; set; }
+    }
+
+    private sealed class OrderItemModel
+    {
+        public Guid ProductId { get; set; }
+        public int Quantity { get; set; } = 1;
+        public decimal UnitPrice { get; set; } = 10;
+    }
+}

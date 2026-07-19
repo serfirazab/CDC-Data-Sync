@@ -1,0 +1,54 @@
+@page "/"
+
+<PageTitle>Dual Write Demo</PageTitle>
+
+<div class="text-center mt-5">
+    <h1>Dual Write Problem Demo</h1>
+    <p class="lead">
+        Dağıtık sistemlerdeki <strong>çifte yazma (dual write)</strong> problemini
+        sergileyen ve <strong>Transactional Outbox + Debezium CDC</strong> ile çözen
+        referans proje.
+    </p>
+</div>
+
+<div class="row mt-4">
+    <div class="col-md-6 mb-3">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Scenario</h5>
+                <p class="card-text">
+                    <strong>OrderService</strong> bir siparişi DB'ye yazar ve
+                    <strong>InventoryService</strong>'in stok düşürmesi için
+                    Kafka'ya <code>OrderCreated</code> event'i gönderir.
+                </p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-6 mb-3">
+        <div class="card border-danger">
+            <div class="card-body">
+                <h5 class="card-title text-danger">The Problem</h5>
+                <p class="card-text">
+                    DB yazma ve Kafka publish atomik değil. Servis crash olursa
+                    sipariş DB'de kalır ama event gitmez — <strong>veri tutarsızlığı</strong>.
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row mt-2">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <h5 class="card-title">Quick Start</h5>
+                <ol>
+                    <li><strong><a href="create-order">Create Order</a></strong> — "Crash Simulate Et" işaretli bir sipariş oluşturun</li>
+                    <li><strong><a href="orders">Orders</a></strong> — Sipariş var ama event yoksa kırmızı uyarı göreceksiniz</li>
+                    <li><strong><a href="inventory">Inventory</a></strong> — Stok düşmedi, çünkü event hiç gitmedi</li>
+                    <li><strong><a href="event-log">Event Log</a></strong> — Canlı Kafka mesaj akışı</li>
+                </ol>
+            </div>
+        </div>
+    </div>
+</div>

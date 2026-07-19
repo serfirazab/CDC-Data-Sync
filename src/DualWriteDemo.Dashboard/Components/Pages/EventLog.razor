@@ -1,0 +1,76 @@
+@page "/event-log"
+@rendermode InteractiveServer
+@inject EventLogService EventLogSvc
+
+<h3>Event Log</h3>
+
+<p class="text-muted">Live Kafka events consumed from <code>order-created</code> topic.</p>
+
+@if (events.Count == 0)
+{
+    <p>No events received yet. Create an order to see events appear here.</p>
+}
+else
+{
+    <table class="table table-sm table-striped">
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Event</th>
+                <th>Order ID</th>
+                <th>Customer</th>
+                <th>Items</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var evt in events)
+            {
+                <tr>
+                    <td>@evt.ReceivedAt.ToLocalTime().ToString("HH:mm:ss.fff")</td>
+                    <td><span class="badge bg-info">@evt.EventType</span></td>
+                    <td title="@evt.OrderId">@evt.OrderId.ToString("N")[..12]</td>
+                    <td>@evt.CustomerName</td>
+                    <td>@evt.ItemCount</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<EventLogEntry> events = [];
+    private PeriodicTimer? _timer;
+
+    protected override void OnInitialized()
+    {
+        UpdateEvents();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _timer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+            _ = PollEvents();
+        }
+    }
+
+    private async Task PollEvents()
+    {
+        while (_timer is not null && await _timer.WaitForNextTickAsync())
+        {
+            UpdateEvents();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private void UpdateEvents()
+    {
+        events = [.. EventLogSvc.GetRecentEvents()];
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+    }
+}
