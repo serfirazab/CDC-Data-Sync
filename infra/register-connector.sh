@@ -26,6 +26,8 @@ CONFIG='{
     "transforms.outbox.table.field.event.id": "id",
     "transforms.outbox.table.field.event.type": "event_type",
     "transforms.outbox.table.field.event.payload": "payload",
+    "transforms.outbox.table.field.event.key": "id",
+    "transforms.outbox.table.field.event.aggregate.type": "event_type",
 
     "transforms.outbox.route.by.field": "event_type",
     "transforms.outbox.route.topic.replacement": "order-created",

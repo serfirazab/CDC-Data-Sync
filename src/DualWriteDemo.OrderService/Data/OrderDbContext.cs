@@ -37,7 +37,7 @@ public sealed class OrderDbContext(DbContextOptions<OrderDbContext> options) : D
         {
             entity.ToTable("outbox_messages");
             entity.HasKey(e => e.Id);
-            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.Id).HasColumnName("id").ValueGeneratedNever();
             entity.Property(e => e.EventType).HasColumnName("event_type").HasMaxLength(255);
             entity.Property(e => e.Payload).HasColumnName("payload").HasColumnType("jsonb");
             entity.Property(e => e.CreatedAt).HasColumnName("created_at");

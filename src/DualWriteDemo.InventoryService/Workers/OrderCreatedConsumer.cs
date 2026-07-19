@@ -33,7 +33,14 @@ public sealed class OrderCreatedConsumer(
                 {
                     var result = consumer.Consume(stoppingToken);
 
-                    var orderEvent = JsonSerializer.Deserialize<OrderCreatedEvent>(result.Message.Value);
+                    // Debezium Outbox SMT payload'ı JSON string olarak publish eder.
+                    // Kafka mesajı bazen çift encode edilir ("{\"Items\":...}").
+                    var messageValue = result.Message.Value;
+                    if (messageValue.StartsWith('"'))
+                    {
+                        messageValue = JsonSerializer.Deserialize<string>(messageValue) ?? messageValue;
+                    }
+                    var orderEvent = JsonSerializer.Deserialize<OrderCreatedEvent>(messageValue);
                     if (orderEvent is null)
                     {
                         logger.LogWarning("Deserialized null event, skipping");
@@ -64,6 +71,10 @@ public sealed class OrderCreatedConsumer(
                 catch (ConsumeException ex)
                 {
                     logger.LogError(ex, "Kafka consume error");
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Unexpected error processing event");
                 }
             }
         }

@@ -5,7 +5,7 @@ using DualWriteDemo.Shared;
 
 namespace DualWriteDemo.Dashboard.Services;
 
-public sealed class EventLogService : BackgroundService
+public sealed class EventLogService(ILogger<EventLogService> logger) : BackgroundService
 {
     private readonly ConcurrentQueue<EventLogEntry> _events = new();
     private readonly int _maxEvents = 500;
@@ -40,7 +40,15 @@ public sealed class EventLogService : BackgroundService
                 try
                 {
                     var result = consumer.Consume(stoppingToken);
-                    var orderEvent = JsonSerializer.Deserialize<OrderCreatedEvent>(result.Message.Value);
+
+                    // Debezium Outbox SMT payload'ı JSON string olarak publish eder.
+                    // Kafka mesajı bazen çift encode edilir ("{\"Items\":...}").
+                    var messageValue = result.Message.Value;
+                    if (messageValue.StartsWith('"'))
+                    {
+                        messageValue = JsonSerializer.Deserialize<string>(messageValue) ?? messageValue;
+                    }
+                    var orderEvent = JsonSerializer.Deserialize<OrderCreatedEvent>(messageValue);
 
                     if (orderEvent is not null)
                     {
@@ -60,6 +68,10 @@ public sealed class EventLogService : BackgroundService
                 catch (ConsumeException)
                 {
                     // Ignore consumer errors in dashboard
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Unexpected error processing event");
                 }
             }
         }
