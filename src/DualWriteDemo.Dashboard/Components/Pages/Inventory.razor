@@ -1,0 +1,51 @@
+@page "/inventory"
+@attribute [StreamRendering]
+@rendermode InteractiveServer
+@inject InventoryApiClient InventoryApi
+
+<h3>Inventory</h3>
+
+@if (products is null)
+{
+    <p>Loading...</p>
+}
+else if (products.Count == 0)
+{
+    <p>No products found.</p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Product</th>
+                <th>Stock Quantity</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var product in products)
+            {
+                var stockClass = product.StockQuantity switch
+                {
+                    <= 0 => "text-danger fw-bold",
+                    < 20 => "text-warning fw-bold",
+                    _ => ""
+                };
+
+                <tr>
+                    <td>@product.Name</td>
+                    <td class="@stockClass">@product.StockQuantity</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<ProductInfo>? products;
+
+    protected override async Task OnInitializedAsync()
+    {
+        products = await InventoryApi.GetProductsAsync();
+    }
+}

@@ -1,0 +1,93 @@
+@page "/orders"
+@attribute [StreamRendering]
+@rendermode InteractiveServer
+@inject OrderApiClient OrderApi
+@inject EventLogService EventLog
+
+<h3>Orders</h3>
+
+@if (orders is null)
+{
+    <p>Loading...</p>
+}
+else if (orders.Count == 0)
+{
+    <p>No orders found.</p>
+}
+else
+{
+    <table class="table table-striped">
+        <thead>
+            <tr>
+                <th>Order ID</th>
+                <th>Customer</th>
+                <th>Total</th>
+                <th>Status</th>
+                <th>Created</th>
+                <th>Consistency</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var order in orders)
+            {
+                var hasEvent = EventLog.ContainsOrderId(order.Id);
+                var isInconsistent = !hasEvent && (DateTime.UtcNow - order.CreatedAt).TotalSeconds > 5;
+
+                <tr>
+                    <td title="@order.Id">@order.Id.ToString("N")[..8]</td>
+                    <td>@order.CustomerName</td>
+                    <td>@order.TotalAmount.ToString("C")</td>
+                    <td>@order.Status</td>
+                    <td>@order.CreatedAt.ToLocalTime().ToString("HH:mm:ss")</td>
+                    <td>
+                        @if (hasEvent)
+                        {
+                            <span class="badge bg-success">Event received</span>
+                        }
+                        else if (isInconsistent)
+                        {
+                            <span class="badge bg-danger">⚠ Inconsistency</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-warning text-dark">Waiting for event...</span>
+                        }
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<OrderSummary>? orders;
+    private PeriodicTimer? _timer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        orders = await OrderApi.GetOrdersAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _timer = new PeriodicTimer(TimeSpan.FromSeconds(3));
+            _ = PollOrders();
+        }
+    }
+
+    private async Task PollOrders()
+    {
+        while (_timer is not null && await _timer.WaitForNextTickAsync())
+        {
+            orders = await OrderApi.GetOrdersAsync();
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+    }
+}
