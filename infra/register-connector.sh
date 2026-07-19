@@ -1,13 +1,11 @@
 #!/bin/sh
 # Debezium PostgreSQL connector kaydı
-# Bu script, Kafka Connect health check'i geçtikten sonra
-# connector-init servisi tarafından otomatik olarak çalıştırılır.
+# connector-init servisi tarafından otomatik çalıştırılır.
+# Outbox Event Router SMT ile outbox_messages tablosu -> order-created topic.
 
 CONNECTOR_NAME="outbox-connector"
 CONNECT_URL="http://kafka-connect:8083"
 
-# Connector config JSON'ı
-# Faz 2'de table.include.list ve outbox SMT ayarları doldurulacak.
 CONFIG='{
   "name": "'"${CONNECTOR_NAME}"'",
   "config": {
@@ -18,26 +16,39 @@ CONFIG='{
     "database.password": "order_pass",
     "database.dbname": "orders_db",
     "topic.prefix": "cdc",
-    "plugin.name": "pgoutput"
+    "plugin.name": "pgoutput",
+
+    "table.include.list": "public.outbox_messages",
+
+    "transforms": "outbox",
+    "transforms.outbox.type": "io.debezium.transforms.outbox.EventRouter",
+
+    "transforms.outbox.table.field.event.id": "id",
+    "transforms.outbox.table.field.event.type": "event_type",
+    "transforms.outbox.table.field.event.payload": "payload",
+
+    "transforms.outbox.route.by.field": "event_type",
+    "transforms.outbox.route.topic.replacement": "order-created",
+
+    "value.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "value.converter.schemas.enable": "false",
+    "key.converter": "org.apache.kafka.connect.json.JsonConverter",
+    "key.converter.schemas.enable": "false"
   }
 }'
 
 echo "Registering Debezium connector: ${CONNECTOR_NAME}"
 
-# Connector zaten kayıtlı mı kontrol et, yoksa oluştur
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${CONNECT_URL}/connectors/${CONNECTOR_NAME}")
-if [ "$STATUS" = "404" ]; then
-  curl -s -X POST "${CONNECT_URL}/connectors" \
-    -H "Content-Type: application/json" \
-    -d "${CONFIG}" | echo "Connector registered successfully"
-elif [ "$STATUS" = "200" ]; then
-  echo "Connector already registered, updating config"
-  curl -s -X PUT "${CONNECT_URL}/connectors/${CONNECTOR_NAME}/config" \
-    -H "Content-Type: application/json" \
-    -d "$(echo "${CONFIG}" | jq -r '.config')" | echo "Connector config updated"
-else
-  echo "Unexpected status: ${STATUS}"
-  exit 1
+if [ "$STATUS" = "200" ]; then
+  echo "Connector already registered, deleting and recreating"
+  curl -s -X DELETE "${CONNECT_URL}/connectors/${CONNECTOR_NAME}" > /dev/null
+  sleep 2
 fi
+
+echo "Creating connector: ${CONNECTOR_NAME}"
+curl -s -X POST "${CONNECT_URL}/connectors" \
+  -H "Content-Type: application/json" \
+  -d "${CONFIG}"
 
 echo "Debezium connector registration complete"

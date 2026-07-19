@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Confluent.Kafka;
 using DualWriteDemo.OrderService.Data;
 using DualWriteDemo.OrderService.Models;
 using DualWriteDemo.Shared;
@@ -42,6 +41,9 @@ public sealed class OrdersController(
         var orderId = Guid.NewGuid();
         var totalAmount = request.Items.Sum(i => i.Quantity * i.UnitPrice);
 
+        // Tek transaction icinde: Order + OrderItems + OutboxMessage birlikte yazilir
+        await using var tx = await db.Database.BeginTransactionAsync();
+
         var order = new Order
         {
             Id = orderId,
@@ -59,46 +61,44 @@ public sealed class OrdersController(
             }).ToList()
         };
 
-        // Adim 1: DB'ye yaz (tek local transaction)
         db.Orders.Add(order);
-        await db.SaveChangesAsync();
 
-        logger.LogInformation("Order {OrderId} saved to database", orderId);
-
-        // Fault injection: fault injection acik ve simulateCrash true ise patla
-        var faultEnabled = config.GetValue<bool>("FaultInjection:Enabled");
-        if (faultEnabled && request.SimulateCrash)
-        {
-            logger.LogWarning("Fault injection triggered for order {OrderId}. Crashing after DB write.", orderId);
-            throw new InvalidOperationException("Simulated crash after DB write — event never published.");
-        }
-
-        // Adim 2: Kafka'ya publish (ayri, atomik olmayan adim)
-        await PublishOrderCreatedEvent(order);
-
-        logger.LogInformation("Order {OrderId} event published to Kafka", orderId);
-
-        return Ok(new OrderResponse(order.Id, order.CustomerName, order.TotalAmount, order.Status, order.CreatedAt));
-    }
-
-    private async Task PublishOrderCreatedEvent(Order order)
-    {
-        var kafkaConfig = config.GetSection("Kafka");
-        var producerConfig = new ProducerConfig
-        {
-            BootstrapServers = kafkaConfig["BootstrapServers"] ?? "localhost:9094",
-            Acks = Acks.All
-        };
-
+        // Outbox mesaji da ayni transaction icinde
         var orderEvent = new OrderCreatedEvent(
             order.Id,
             order.CustomerName,
             order.Items.Select(i => new OrderItemEvent(i.ProductId, i.Quantity, i.UnitPrice)).ToList(),
             order.CreatedAt);
 
-        var payload = JsonSerializer.Serialize(orderEvent);
+        var outboxMessage = new OutboxMessage
+        {
+            Id = Guid.NewGuid(),
+            EventType = "OrderCreated",
+            Payload = JsonSerializer.Serialize(orderEvent),
+            CreatedAt = DateTime.UtcNow
+        };
 
-        using var producer = new ProducerBuilder<Null, string>(producerConfig).Build();
-        await producer.ProduceAsync("order-created", new Message<Null, string> { Value = payload });
+        db.OutboxMessages.Add(outboxMessage);
+
+        await db.SaveChangesAsync();
+
+        logger.LogInformation("Order {OrderId} and outbox message saved in single transaction", orderId);
+
+        // Fault injection: crash simule edilirse transaction rollback olur
+        // Faz 1'den farki: outbox sayesinde hicbir ara durum olusmaz
+        var faultEnabled = config.GetValue<bool>("FaultInjection:Enabled");
+        if (faultEnabled && request.SimulateCrash)
+        {
+            logger.LogWarning("Fault injection triggered for order {OrderId}. Rolling back transaction.", orderId);
+            await tx.RollbackAsync();
+            throw new InvalidOperationException("Simulated crash — transaction rolled back. No data written.");
+        }
+
+        // Transaction commit: Order + OutboxMessage birlikte kalici olur
+        await tx.CommitAsync();
+
+        logger.LogInformation("Order {OrderId} committed. Debezium will pick up the outbox message.", orderId);
+
+        return Ok(new OrderResponse(order.Id, order.CustomerName, order.TotalAmount, order.Status, order.CreatedAt));
     }
 }
