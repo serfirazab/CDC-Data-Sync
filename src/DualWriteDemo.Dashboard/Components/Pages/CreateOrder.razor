@@ -1,0 +1,150 @@
+@page "/create-order"
+@rendermode InteractiveServer
+@inject OrderApiClient OrderApi
+@inject InventoryApiClient InventoryApi
+@inject NavigationManager Navigation
+
+<h3>Create Order</h3>
+
+@if (products is null)
+{
+    <p>Loading products...</p>
+}
+else
+{
+    <EditForm Model="@formModel" OnValidSubmit="@HandleSubmit">
+        <div class="mb-3">
+            <label class="form-label">Customer Name</label>
+            <InputText @bind-Value="formModel.CustomerName" class="form-control" />
+        </div>
+
+        <h5>Order Items</h5>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Product</th>
+                    <th>Quantity</th>
+                    <th>Unit Price</th>
+                    <th>Total</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var item in formModel.Items.Select((value, index) => new { value, index }))
+                {
+                    <tr>
+                        <td>
+                            <select @bind="item.value.ProductId" class="form-select">
+                                <option value="">Select a product...</option>
+                                @foreach (var product in products)
+                                {
+                                    <option value="@product.Id">@product.Name (stock: @product.StockQuantity)</option>
+                                }
+                            </select>
+                        </td>
+                        <td>
+                            <InputNumber @bind-Value="item.value.Quantity" class="form-control" min="1" />
+                        </td>
+                        <td>
+                            <InputNumber @bind-Value="item.value.UnitPrice" class="form-control" min="0" step="0.01" />
+                        </td>
+                        <td>@((item.value.Quantity * item.value.UnitPrice).ToString("C"))</td>
+                        <td>
+                            <button type="button" class="btn btn-danger btn-sm"
+                                    @onclick="() => formModel.Items.RemoveAt(item.index)">Remove</button>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+
+        <button type="button" class="btn btn-secondary mb-3" @onclick="AddItem">Add Item</button>
+
+        <div class="mb-3 form-check">
+            <InputCheckbox @bind-Value="formModel.SimulateCrash" class="form-check-input" id="simulateCrash" />
+            <label class="form-check-label text-danger" for="simulateCrash">Crash Simulate Et (Fault Injection)</label>
+        </div>
+
+        <button type="submit" class="btn btn-primary">Create Order</button>
+    </EditForm>
+
+    @if (!string.IsNullOrEmpty(error))
+    {
+        <div class="alert alert-danger mt-3">@error</div>
+    }
+}
+
+@code {
+    private List<ProductInfo>? products;
+    private CreateOrderModel formModel = new();
+    private string? error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        products = await InventoryApi.GetProductsAsync();
+    }
+
+    private void AddItem()
+    {
+        formModel.Items.Add(new OrderItemModel());
+    }
+
+    private async Task HandleSubmit()
+    {
+        error = null;
+
+        var request = new CreateOrderRequest(
+            formModel.CustomerName,
+            formModel.Items
+                .Where(i => i.ProductId != Guid.Empty)
+                .Select(i => new OrderItemInput(i.ProductId, i.Quantity, i.UnitPrice))
+                .ToList(),
+            formModel.SimulateCrash);
+
+        try
+        {
+            var result = await OrderApi.CreateOrderAsync(request);
+
+            if (result is null)
+            {
+                if (formModel.SimulateCrash)
+                {
+                    error = "Order saved to DB but fault injection triggered — event was never published to Kafka. Check the Orders page for inconsistency.";
+                }
+                else
+                {
+                    error = "Failed to create order. Check if OrderService is running.";
+                }
+            }
+            else
+            {
+                Navigation.NavigateTo("/orders");
+            }
+        }
+        catch (Exception ex)
+        {
+            if (formModel.SimulateCrash)
+            {
+                error = "Fault injection: Order saved to DB but crash occurred before Kafka publish. Check the Orders page for inconsistency indicator.";
+            }
+            else
+            {
+                error = $"Error: {ex.Message}";
+            }
+        }
+    }
+
+    private sealed class CreateOrderModel
+    {
+        public string CustomerName { get; set; } = "Demo Customer";
+        public List<OrderItemModel> Items { get; set; } = [new()];
+        public bool SimulateCrash { get; set; }
+    }
+
+    private sealed class OrderItemModel
+    {
+        public Guid ProductId { get; set; }
+        public int Quantity { get; set; } = 1;
+        public decimal UnitPrice { get; set; } = 10;
+    }
+}
