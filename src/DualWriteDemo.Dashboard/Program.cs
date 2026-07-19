@@ -16,7 +16,8 @@ builder.Services.AddHttpClient<InventoryApiClient>(client =>
     client.BaseAddress = new Uri(builder.Configuration["Services:InventoryService"] ?? "http://localhost:5001");
 });
 
-builder.Services.AddHostedService<EventLogService>();
+builder.Services.AddSingleton<EventLogService>();
+builder.Services.AddHostedService<EventLogService>(sp => sp.GetRequiredService<EventLogService>());
 
 var app = builder.Build();
 
